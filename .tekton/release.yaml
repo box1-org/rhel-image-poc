@@ -262,6 +262,8 @@ spec:
         value: "$(tasks.build.results.image-digest)"
       - name: disk-digest
         value: "$(tasks.disk.results.disk-digest)"
+      - name: rhacs-url
+        value: "$(tasks.security.results.rhacs-url)"
   taskRunSpecs:
     - pipelineTaskName: security
       serviceAccountName: ci-build
