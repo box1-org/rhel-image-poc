@@ -23,6 +23,17 @@ local/                 build and boot an arm64 VM on an Apple Silicon Mac
 - Members of `wheel` use sudo without a password. The image sets no passwords; administrators log in with SSH keys only.
 - **No packages are installed.** The RHEL repositories need an entitlement, and the build environments don't have one yet. The base image already includes python3, sshd, sudo and podman. It does **not** include cloud-init or qemu-guest-agent.
 
+## Base image facts (rhel-bootc 10.2)
+
+Checked on 2026-11-05 against the pinned digest.
+
+| Package | Status |
+| --- | --- |
+| python3 3.12, openssh-server, sudo, podman 5.8, bootc 1.16 | present |
+| cloud-init, qemu-guest-agent | **absent** |
+
+Because cloud-init and the guest agent are missing, KubeVirt cloud-init user data and `accessCredentials` do nothing. Admin keys go in through bootc-image-builder's `[[customizations.user]]` when the disk is built. Installing either package needs an RHEL entitlement inside the build.
+
 ## Build and run locally (Apple Silicon)
 
 You need a podman machine and a `registry.redhat.io` auth file stored under `/Users` or `/private`.
