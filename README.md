@@ -21,7 +21,7 @@ local/                 build and boot an arm64 VM on an Apple Silicon Mac
   - x86_64 uses `ttyS0`, for KubeVirt and `virtctl console`;
   - aarch64 uses `hvc0`, for vfkit.
 - Members of `wheel` use sudo without a password. The image sets no passwords; administrators log in with SSH keys only.
-- **No packages are installed.** The RHEL repositories need an entitlement, and the build environments don't have one yet. The base image already includes python3, sshd, sudo and podman. It does **not** include cloud-init or qemu-guest-agent.
+- **qemu-guest-agent** is installed from the RHEL CDN. It starts through udev only when the KubeVirt guest-agent channel exists, so it stays idle under vfkit. Packages are installed with the cluster's Simple Content Access entitlement, passed as **build secrets** (`--secret id=entitlement-cert` / `entitlement-key`). The certificate is never written to an image layer. Repository definitions are in `build/repos/rhel10-cdn.repo`, which holds no credentials.
 
 ## Base image facts (rhel-bootc 10.2)
 
@@ -30,16 +30,17 @@ Checked on 2026-11-05 against the pinned digest.
 | Package | Status |
 | --- | --- |
 | python3 3.12, openssh-server, sudo, podman 5.8, bootc 1.16 | present |
-| cloud-init, qemu-guest-agent | **absent** |
+| cloud-init, qemu-guest-agent | **absent** (qemu-guest-agent is added by this image) |
 
-Because cloud-init and the guest agent are missing, KubeVirt cloud-init user data and `accessCredentials` do nothing. Admin keys go in through bootc-image-builder's `[[customizations.user]]` when the disk is built. Installing either package needs an RHEL entitlement inside the build.
+Because cloud-init and the guest agent are missing, KubeVirt cloud-init user data and `accessCredentials` do nothing. Admin keys go in through bootc-image-builder's `[[customizations.user]]` when the disk is built. Installing packages needs the RHEL entitlement described above.
 
 ## Build and run locally (Apple Silicon)
 
 You need a podman machine and a `registry.redhat.io` auth file stored under `/Users` or `/private`.
 
 ```sh
-REGISTRY_AUTH_FILE=/path/to/auth.json local/build-local.sh   # arm64 image + local/output/disk.raw
+REGISTRY_AUTH_FILE=/path/to/auth.json ENTITLEMENT_DIR=/path/to/ent \
+  local/build-local.sh                                       # arm64 image + local/output/disk.raw
 local/run-local.sh                                           # boot with vfkit, serial console on this terminal
 ssh cloud-user@<ip>    # IP: grep -A3 5a:94:ef:b0:c1:1 /var/db/dhcpd_leases
 ```
@@ -63,6 +64,12 @@ The CI identities and the PaC `Repository` live in `box1-gitops/platform/pipelin
 
 - `box1-ci/redhat-registry-pull`: a dockerconfigjson that holds only the `registry.redhat.io` entry, copied from the cluster pull secret.
 - `box1-ci/rhel-image-poc-admin-key` (optional): a ConfigMap whose key `ssh.pub` is the administrator's public key, which is baked into the disk.
+- `box1-ci/etc-pki-entitlement`: a copy of `openshift-config-managed/etc-pki-entitlement` (`entitlement.pem`, `entitlement-key.pem`), mounted only into the bootc build tasks for `dnf`. The Insights operator rotates the source certificate, so refresh the copy when builds fail with CDN 403 errors:
+  ```sh
+  oc get secret etc-pki-entitlement -n openshift-config-managed -o json \
+    | jq '{apiVersion, kind, type, data, metadata: {name: "etc-pki-entitlement", namespace: "box1-ci"}}' \
+    | oc apply --server-side --field-manager=box1-rhel-image-poc -f -
+  ```
 
 ## Deploy the VM (manual for the POC)
 
