@@ -58,6 +58,9 @@ spec:
             - name: redhat-registry
               secret:
                 secretName: redhat-registry-pull
+            - name: entitlement
+              secret:
+                secretName: etc-pki-entitlement
           stepTemplate:
             image: registry.access.redhat.com/ubi9/buildah@sha256:12ab6d225aef49ceed4c7b39e7ab207c4b7f4a67b7dba04a61efbac92c01b8b8
             workingDir: /workspace/source
@@ -85,6 +88,9 @@ spec:
               - name: redhat-registry
                 mountPath: /etc/redhat-registry
                 readOnly: true
+              - name: entitlement
+                mountPath: /etc/entitlement
+                readOnly: true
           steps:
             - name: fetch
               workingDir: /workspace
@@ -107,6 +113,8 @@ spec:
                 #!/bin/sh
                 set -eu
                 buildah build --layers=false --build-arg SOURCE_REVISION="$REVISION" \
+                  --secret id=entitlement-cert,src=/etc/entitlement/entitlement.pem \
+                  --secret id=entitlement-key,src=/etc/entitlement/entitlement-key.pem \
                   -t "$IMAGE:$REVISION" .
                 token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
                 buildah push --creds "serviceaccount:$token" --digestfile /workspace/digest "$IMAGE:$REVISION"

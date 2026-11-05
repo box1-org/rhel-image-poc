@@ -6,15 +6,30 @@ FROM registry.redhat.io/rhel10/rhel-bootc:10.2@sha256:80485ddb9025df594891c36e23
 
 ARG SOURCE_REVISION=unknown
 
-# No dnf install: RHEL repositories need entitlement, which neither the local
-# podman machine nor the box1-ci build pods have yet. This image only layers
-# files and systemd units onto the base.
+# Packages come from the RHEL CDN using the cluster's Simple Content Access
+# entitlement, supplied only at build time as secrets (never stored in a layer):
+#   --secret id=entitlement-cert,src=.../entitlement.pem
+#   --secret id=entitlement-key,src=.../entitlement-key.pem
+# build/repos/rhel10-cdn.repo holds the repository definitions (no credentials).
+# subscription-manager is disabled for this step: in container mode it expects
+# a host-provided redhat.repo.
+RUN --mount=type=secret,id=entitlement-cert,target=/run/secrets/entitlement/entitlement.pem,required=true \
+    --mount=type=secret,id=entitlement-key,target=/run/secrets/entitlement/entitlement-key.pem,required=true \
+    --mount=type=bind,source=build/repos,target=/run/box1-repos \
+    dnf -y --disableplugin=subscription-manager,product-id --setopt=reposdir=/run/box1-repos \
+        --setopt=install_weak_deps=False install \
+        qemu-guest-agent \
+ && dnf clean all \
+ && rm -rf /var/cache/dnf /var/cache/ldconfig /var/lib/dnf /var/lib/rhsm /var/log/dnf* /var/log/hawkey.log /var/log/rhsm /var/log/qemu-ga
+
 COPY rootfs/ /
 
-RUN printf 'BOX1_POC_REVISION=%s\n' "${SOURCE_REVISION}" > /usr/lib/box1-poc-release \
+RUN rm -rf /run/secrets/entitlement /run/box1-repos /run/rhsm \
+ && printf 'BOX1_POC_REVISION=%s\n' "${SOURCE_REVISION}" > /usr/lib/box1-poc-release \
  && chmod 0755 /usr/libexec/box1-poc/hello \
  && chmod 0440 /etc/sudoers.d/90-box1-wheel && visudo -cf /etc/sudoers.d/90-box1-wheel \
  && systemctl set-default box1-poc.target \
+ && rpm -q qemu-guest-agent \
  && bootc container lint
 
 LABEL org.opencontainers.image.source="https://github.com/box1-org/rhel-image-poc" \
