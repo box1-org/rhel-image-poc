@@ -13,7 +13,7 @@ metadata:
 spec:
   source:
     registry:
-      url: docker://image-registry.openshift-image-registry.svc:5000/box1-ci/rhel-image-poc-disk@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      url: docker://image-registry.openshift-image-registry.svc:5000/box1-ci/rhel-image-poc-disk@sha256:e706a8918c9b605910785fcd9a68824ec43c5ec3142feab3887cebd624434d28
       pullMethod: node
   storage:
     storageClassName: lvms-vg1
