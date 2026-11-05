@@ -264,6 +264,8 @@ spec:
         value: "$(tasks.disk.results.disk-digest)"
       - name: rhacs-url
         value: "$(tasks.security.results.rhacs-url)"
+      - name: rhtpa-sbom-url
+        value: "$(tasks.security.results.rhtpa-sbom-url)"
   taskRunSpecs:
     - pipelineTaskName: security
       serviceAccountName: ci-build
