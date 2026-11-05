@@ -1,0 +1,3 @@
+box1 RHEL 10 image mode POC. The OS is immutable; change it through git + the Tekton release.
+  bootc status            show booted/staged/rollback images
+  journalctl -u box1-poc-hello

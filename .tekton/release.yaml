@@ -1,0 +1,267 @@
+# Release on push to main:
+#   build    - bootc OS image -> box1-ci/rhel-image-poc (privileged: overlay storage)
+#   security - central box1-security-gates (TPA SBOM + ACS scan), observe mode
+#   disk     - bootc-image-builder qcow2 -> containerDisk box1-ci/rhel-image-poc-disk (privileged)
+# No promote task yet: deploy/datavolume.yaml is updated by hand (box1-docs#46).
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: rhel-image-poc-release-
+  labels:
+    backstage.io/kubernetes-id: rhel-image-poc
+  annotations:
+    pipelinesascode.tekton.dev/on-event: "[push]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/target-namespace: box1-ci
+    pipelinesascode.tekton.dev/max-keep-runs: "10"
+spec:
+  taskRunTemplate:
+    serviceAccountName: ci-bootc-release
+  timeouts:
+    pipeline: 90m
+  params:
+    - name: revision
+      value: "{{revision}}"
+    - name: git-auth-secret
+      value: "{{git_auth_secret}}"
+    - name: security-gates
+      value: observe
+  pipelineSpec:
+    params:
+      - name: revision
+        type: string
+      - name: git-auth-secret
+        type: string
+      - name: security-gates
+        type: string
+        default: observe
+    tasks:
+      - name: build
+        retries: 1   # PAC can briefly create the run before its git auth Secret.
+        params:
+          - name: revision
+            value: "$(params.revision)"
+          - name: git-auth-secret
+            value: "$(params.git-auth-secret)"
+        taskSpec:
+          params:
+            - name: revision
+            - name: git-auth-secret
+          results:
+            - name: image-digest
+              description: Digest of the pushed bootc OS image.
+          volumes:
+            - name: workspace
+              emptyDir: {}
+            - name: containers
+              emptyDir: {}
+            - name: redhat-registry
+              secret:
+                secretName: redhat-registry-pull
+          stepTemplate:
+            image: registry.access.redhat.com/ubi9/buildah@sha256:12ab6d225aef49ceed4c7b39e7ab207c4b7f4a67b7dba04a61efbac92c01b8b8
+            workingDir: /workspace/source
+            securityContext:
+              privileged: true
+            computeResources:
+              requests: {cpu: 500m, memory: 1Gi}
+              limits: {cpu: "2", memory: 4Gi}
+            env:
+              - name: REVISION
+                value: "$(params.revision)"
+              - name: IMAGE
+                value: registry.apps.ocp.box1.org/box1-ci/rhel-image-poc
+              - name: STORAGE_DRIVER
+                value: overlay
+              - name: BUILDAH_FORMAT
+                value: oci
+              - name: REGISTRY_AUTH_FILE
+                value: /etc/redhat-registry/.dockerconfigjson
+            volumeMounts:
+              - name: workspace
+                mountPath: /workspace
+              - name: containers
+                mountPath: /var/lib/containers
+              - name: redhat-registry
+                mountPath: /etc/redhat-registry
+                readOnly: true
+          steps:
+            - name: fetch
+              workingDir: /workspace
+              env:
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: "$(params.git-auth-secret)"
+                      key: git-provider-token
+              script: |
+                #!/bin/sh
+                set -eu
+                echo "$REVISION" | grep -Eq '^[a-f0-9]{40}$'
+                mkdir -p source
+                curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+                  "https://api.github.com/repos/box1-org/rhel-image-poc/tarball/$REVISION" \
+                  | tar -xz --strip-components=1 -C source
+            - name: build-push
+              script: |
+                #!/bin/sh
+                set -eu
+                buildah build --layers=false --build-arg SOURCE_REVISION="$REVISION" \
+                  -t "$IMAGE:$REVISION" .
+                token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+                buildah push --creds "serviceaccount:$token" --digestfile /workspace/digest "$IMAGE:$REVISION"
+                digest=$(cat /workspace/digest)
+                echo "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$'
+                printf '%s' "$digest" > "$(results.image-digest.path)"
+                printf 'Published %s@%s\n' "$IMAGE" "$digest"
+      - name: security
+        runAfter: [build]
+        taskRef:
+          resolver: cluster
+          params:
+            - name: kind
+              value: task
+            - name: name
+              value: box1-security-gates
+            - name: namespace
+              value: box1-ci
+        params:
+          - name: image-reference
+            value: "image-registry.openshift-image-registry.svc:5000/box1-ci/rhel-image-poc@$(tasks.build.results.image-digest)"
+          - name: image-digest
+            value: "$(tasks.build.results.image-digest)"
+          - name: source-revision
+            value: "$(params.revision)"
+          - name: source-repository
+            value: box1-org/rhel-image-poc
+          - name: application-name
+            value: rhel-image-poc
+          - name: pipeline-run
+            value: "$(context.pipelineRun.name)"
+          - name: enforcement
+            value: "$(params.security-gates)"
+          - name: rhtpa-secret
+            value: rhtpa-ci
+          - name: rhacs-secret
+            value: rhacs-ci
+      - name: disk
+        runAfter: [security]
+        params:
+          - name: revision
+            value: "$(params.revision)"
+          - name: image-digest
+            value: "$(tasks.build.results.image-digest)"
+        taskSpec:
+          params:
+            - name: revision
+            - name: image-digest
+          results:
+            - name: disk-digest
+              description: Digest of the pushed containerDisk image.
+          volumes:
+            - name: workspace
+              emptyDir: {}
+            - name: containers
+              emptyDir: {}
+            - name: osbuild-store
+              emptyDir: {}
+            - name: redhat-registry
+              secret:
+                secretName: redhat-registry-pull
+            - name: admin-key
+              configMap:
+                name: rhel-image-poc-admin-key
+                optional: true
+          stepTemplate:
+            securityContext:
+              privileged: true
+            computeResources:
+              requests: {cpu: "1", memory: 2Gi}
+              limits: {cpu: "4", memory: 6Gi}
+            env:
+              - name: REVISION
+                value: "$(params.revision)"
+              - name: SOURCE_IMAGE
+                value: registry.apps.ocp.box1.org/box1-ci/rhel-image-poc@$(params.image-digest)
+              - name: LOCAL_IMAGE
+                value: localhost/rhel-image-poc:disk-build
+              - name: DISK_IMAGE
+                value: registry.apps.ocp.box1.org/box1-ci/rhel-image-poc-disk
+              - name: STORAGE_DRIVER
+                value: overlay
+              - name: REGISTRY_AUTH_FILE
+                value: /etc/redhat-registry/.dockerconfigjson
+            volumeMounts:
+              - name: workspace
+                mountPath: /workspace
+              - name: containers
+                mountPath: /var/lib/containers
+              - name: osbuild-store
+                mountPath: /store
+              - name: redhat-registry
+                mountPath: /etc/redhat-registry
+                readOnly: true
+              - name: admin-key
+                mountPath: /etc/admin-key
+                readOnly: true
+          steps:
+            - name: prepare
+              image: registry.access.redhat.com/ubi9/buildah@sha256:12ab6d225aef49ceed4c7b39e7ab207c4b7f4a67b7dba04a61efbac92c01b8b8
+              script: |
+                #!/bin/sh
+                set -eu
+                token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+                buildah pull --creds "serviceaccount:$token" "$SOURCE_IMAGE"
+                buildah tag "$SOURCE_IMAGE" "$LOCAL_IMAGE"
+                mkdir -p /workspace/output
+                # Disk config: no users unless the optional admin key ConfigMap exists.
+                {
+                  printf '# generated for %s\n' "$REVISION"
+                  if [ -s /etc/admin-key/ssh.pub ]; then
+                    printf '[[customizations.user]]\nname = "cloud-user"\nkey = "%s"\ngroups = ["wheel"]\n' \
+                      "$(head -n1 /etc/admin-key/ssh.pub)"
+                    echo "admin key: injected" >&2
+                  else
+                    echo "admin key: none (ConfigMap rhel-image-poc-admin-key absent)" >&2
+                  fi
+                } > /workspace/config.toml
+            - name: bootc-image-builder
+              image: registry.redhat.io/rhel10/bootc-image-builder:10.2@sha256:14adeb06f5fca459c8ac534b59f1dec6d08576dfdf4605b0b27f177ad19f1de8
+              command: ["/usr/bin/bootc-image-builder"]
+              args:
+                - --type
+                - qcow2
+                - --rootfs
+                - xfs
+                - --config
+                - /workspace/config.toml
+                - --output
+                - /workspace/output
+                - localhost/rhel-image-poc:disk-build
+            - name: package-push
+              image: registry.access.redhat.com/ubi9/buildah@sha256:12ab6d225aef49ceed4c7b39e7ab207c4b7f4a67b7dba04a61efbac92c01b8b8
+              workingDir: /workspace
+              script: |
+                #!/bin/sh
+                set -eu
+                ls -lsh output/qcow2/
+                # KubeVirt containerDisk layout: the disk under /disk, owned by qemu (107).
+                ctr=$(buildah from scratch)
+                buildah copy --chown 107:107 "$ctr" output/qcow2/disk.qcow2 /disk/disk.qcow2
+                buildah config --label org.opencontainers.image.revision="$REVISION" \
+                  --label box1.org/bootc-image="$SOURCE_IMAGE" "$ctr"
+                buildah commit --format oci "$ctr" "$DISK_IMAGE:$REVISION"
+                token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+                buildah push --creds "serviceaccount:$token" --digestfile /workspace/disk-digest "$DISK_IMAGE:$REVISION"
+                digest=$(cat /workspace/disk-digest)
+                echo "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$'
+                printf '%s' "$digest" > "$(results.disk-digest.path)"
+                printf 'Published %s@%s\n' "$DISK_IMAGE" "$digest"
+    results:
+      - name: image-digest
+        value: "$(tasks.build.results.image-digest)"
+      - name: disk-digest
+        value: "$(tasks.disk.results.disk-digest)"
+  taskRunSpecs:
+    - pipelineTaskName: security
+      serviceAccountName: ci-build

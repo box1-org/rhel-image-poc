@@ -1,0 +1,43 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: rhel-image-poc
+  namespace: rhel-image-poc
+  labels:
+    backstage.io/kubernetes-id: rhel-image-poc
+    app: rhel-image-poc
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        backstage.io/kubernetes-id: rhel-image-poc
+        kubevirt.io/domain: rhel-image-poc
+    spec:
+      domain:
+        cpu:
+          cores: 2
+        memory:
+          guest: 4Gi
+        firmware:
+          bootloader:
+            efi:
+              secureBoot: false
+        devices:
+          autoattachSerialConsole: true
+          rng: {}
+          disks:
+            - name: root
+              bootOrder: 1
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              masquerade: {}
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: root
+          dataVolume:
+            name: rhel-image-poc-root

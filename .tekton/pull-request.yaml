@@ -1,0 +1,83 @@
+# PR check: build the bootc image (bootc container lint runs inside the
+# Containerfile) without pushing. ci-bootc-check can run privileged pods,
+# because the 66-layer RHEL bootc base needs overlay storage, but it has no API
+# token and no registry rights.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: rhel-image-poc-pr-
+  labels:
+    backstage.io/kubernetes-id: rhel-image-poc
+  annotations:
+    pipelinesascode.tekton.dev/on-event: "[pull_request]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/target-namespace: box1-ci
+    pipelinesascode.tekton.dev/max-keep-runs: "5"
+spec:
+  taskRunTemplate:
+    serviceAccountName: ci-bootc-check
+  timeouts:
+    pipeline: 30m
+  pipelineSpec:
+    tasks:
+      - name: build
+        retries: 1   # PAC can briefly create the run before its git auth Secret.
+        taskSpec:
+          volumes:
+            - name: workspace
+              emptyDir: {}
+            - name: containers
+              emptyDir: {}
+            - name: redhat-registry
+              secret:
+                secretName: redhat-registry-pull
+          stepTemplate:
+            image: registry.access.redhat.com/ubi9/buildah@sha256:12ab6d225aef49ceed4c7b39e7ab207c4b7f4a67b7dba04a61efbac92c01b8b8
+            workingDir: /workspace/source
+            securityContext:
+              privileged: true
+            computeResources:
+              requests: {cpu: 500m, memory: 1Gi}
+              limits: {cpu: "2", memory: 4Gi}
+            env:
+              - name: REVISION
+                value: "{{revision}}"
+              - name: STORAGE_DRIVER
+                value: overlay
+              - name: BUILDAH_FORMAT
+                value: oci
+              - name: REGISTRY_AUTH_FILE
+                value: /etc/redhat-registry/.dockerconfigjson
+            volumeMounts:
+              - name: workspace
+                mountPath: /workspace
+              - name: containers
+                mountPath: /var/lib/containers
+              - name: redhat-registry
+                mountPath: /etc/redhat-registry
+                readOnly: true
+          steps:
+            - name: fetch
+              workingDir: /workspace
+              env:
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: "{{git_auth_secret}}"
+                      key: git-provider-token
+              script: |
+                #!/bin/sh
+                set -eu
+                echo "$REVISION" | grep -Eq '^[a-f0-9]{40}$'
+                mkdir -p source
+                curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+                  "https://api.github.com/repos/box1-org/rhel-image-poc/tarball/$REVISION" \
+                  | tar -xz --strip-components=1 -C source
+                printf 'Fetched rhel-image-poc at %s\n' "$REVISION"
+            - name: build
+              script: |
+                #!/bin/sh
+                set -eu
+                buildah build --layers=false --build-arg SOURCE_REVISION="$REVISION" \
+                  -t localhost/rhel-image-poc:pr .
+                printf 'Built and linted rhel-image-poc at %s (not pushed)\n' "$REVISION"

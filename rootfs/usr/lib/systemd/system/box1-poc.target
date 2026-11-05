@@ -1,0 +1,9 @@
+# Default boot target for the POC. It keeps the normal multi-user system
+# (networking, sshd, getty) and adds the appliance services. The shape matches
+# box1-erp.target in box1-org/box1-docs#25.
+[Unit]
+Description=box1 RHEL image mode POC appliance
+Requires=multi-user.target
+After=multi-user.target
+Wants=box1-poc-hello.service
+AllowIsolate=yes

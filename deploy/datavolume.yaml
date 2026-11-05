@@ -1,0 +1,24 @@
+# Root disk imported once from the pipeline-built containerDisk. It is a
+# persistent PVC, so `bootc upgrade`/`bootc rollback` state survives restarts.
+# Set the digest from the release PipelineRun's disk-digest result.
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: rhel-image-poc-root
+  namespace: rhel-image-poc
+  labels:
+    backstage.io/kubernetes-id: rhel-image-poc
+  annotations:
+    cdi.kubevirt.io/storage.bind.immediate.requested: "false"
+spec:
+  source:
+    registry:
+      url: docker://image-registry.openshift-image-registry.svc:5000/box1-ci/rhel-image-poc-disk@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      pullMethod: node
+  storage:
+    storageClassName: lvms-vg1
+    volumeMode: Block
+    accessModes: [ReadWriteOnce]
+    resources:
+      requests:
+        storage: 20Gi

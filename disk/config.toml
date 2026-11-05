@@ -1,0 +1,6 @@
+# bootc-image-builder settings committed to Git. They contain no users, keys or
+# passwords. The administrator's SSH public key is appended when the disk is built:
+#   - pipeline: ConfigMap box1-ci/rhel-image-poc-admin-key (key: ssh.pub), optional
+#   - local: local/build-local.sh reads ~/.ssh/id_ed25519.pub
+# Note: [[customizations.filesystem]] is rejected for bootc disk types; size the
+# root filesystem with bootc install config or grow the disk instead.

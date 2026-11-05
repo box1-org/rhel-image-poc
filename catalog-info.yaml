@@ -1,0 +1,24 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: rhel-image-poc
+  description: RHEL 10 image mode (bootc) VM proof of concept with a Tekton build, the basis for a VM golden-path template.
+  annotations:
+    github.com/project-slug: box1-org/rhel-image-poc
+    backstage.io/kubernetes-id: rhel-image-poc
+    backstage.io/techdocs-ref: dir:.
+    backstage.io/source-location: url:https://github.com/box1-org/rhel-image-poc/
+    janus-idp.io/tekton: rhel-image-poc
+  tags: [rhel, bootc, image-mode, kubevirt, tekton]
+  links:
+    - url: https://github.com/box1-org/rhel-image-poc
+      title: Source Repository
+      icon: github
+    - url: https://github.com/box1-org/box1-docs/issues/46
+      title: Backlog item (box1-docs#46)
+    - url: https://console-openshift-console.apps.ocp.box1.org/k8s/ns/rhel-image-poc/kubevirt.io~v1~VirtualMachine/rhel-image-poc
+      title: VirtualMachine (OpenShift console)
+spec:
+  type: vm-image
+  lifecycle: experimental
+  owner: user:default/mike4263
