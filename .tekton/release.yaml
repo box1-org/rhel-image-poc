@@ -1,8 +1,10 @@
 # Release on push to main:
 #   build    - bootc OS image -> box1-ci/rhel-image-poc (privileged: overlay storage)
 #   security - central box1-security-gates (TPA SBOM + ACS scan), observe mode
-#   disk     - bootc-image-builder qcow2 -> containerDisk box1-ci/rhel-image-poc-disk (privileged)
-# No promote task yet: deploy/datavolume.yaml is updated by hand (box1-docs#46).
+#   disk     - bootc-image-builder qcow2 -> containerDisk box1-ci/rhel-image-poc-disk (privileged),
+#              then moves the update channel tag box1-ci/rhel-image-poc:main to this image
+# Installed VMs track :main, so `bootc upgrade` picks up each successful release.
+# deploy/datavolume.yaml (first install only) is still updated by hand (box1-docs#46).
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
@@ -191,8 +193,10 @@ spec:
                 value: "$(params.revision)"
               - name: SOURCE_IMAGE
                 value: registry.apps.ocp.box1.org/box1-ci/rhel-image-poc@$(params.image-digest)
-              - name: LOCAL_IMAGE
-                value: localhost/rhel-image-poc:disk-build
+              # The reference installed systems track for `bootc upgrade`: the
+              # in-cluster registry service name and the moving :main channel tag.
+              - name: TRACKED_IMAGE
+                value: image-registry.openshift-image-registry.svc:5000/box1-ci/rhel-image-poc:main
               - name: DISK_IMAGE
                 value: registry.apps.ocp.box1.org/box1-ci/rhel-image-poc-disk
               - name: STORAGE_DRIVER
@@ -220,7 +224,7 @@ spec:
                 set -eu
                 token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
                 buildah pull --creds "serviceaccount:$token" "$SOURCE_IMAGE"
-                buildah tag "$SOURCE_IMAGE" "$LOCAL_IMAGE"
+                buildah tag "$SOURCE_IMAGE" "$TRACKED_IMAGE"
                 mkdir -p /workspace/output
                 # Disk config: no users unless the optional admin key ConfigMap exists.
                 {
@@ -245,7 +249,7 @@ spec:
                 - /workspace/config.toml
                 - --output
                 - /workspace/output
-                - localhost/rhel-image-poc:disk-build
+                - image-registry.openshift-image-registry.svc:5000/box1-ci/rhel-image-poc:main
             - name: package-push
               image: registry.access.redhat.com/ubi9/buildah@sha256:12ab6d225aef49ceed4c7b39e7ab207c4b7f4a67b7dba04a61efbac92c01b8b8
               workingDir: /workspace
@@ -265,6 +269,28 @@ spec:
                 echo "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$'
                 printf '%s' "$digest" > "$(results.disk-digest.path)"
                 printf 'Published %s@%s\n' "$DISK_IMAGE" "$digest"
+            - name: move-channel-tag
+              image: registry.access.redhat.com/ubi9/buildah@sha256:12ab6d225aef49ceed4c7b39e7ab207c4b7f4a67b7dba04a61efbac92c01b8b8
+              env:
+                - name: IMAGE_DIGEST
+                  value: "$(params.image-digest)"
+              script: |
+                #!/bin/sh
+                # Point :main at the exact manifest that was built, scanned and
+                # turned into a disk. Copying the manifest bytes keeps the digest
+                # identical, so bootc status matches this run's image-digest.
+                set -eu
+                token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+                registry=https://image-registry.openshift-image-registry.svc:5000/v2/box1-ci/rhel-image-poc
+                ca=/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
+                accept='application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json'
+                curl -fsS --cacert "$ca" -u "serviceaccount:$token" -H "Accept: $accept" \
+                  -D /workspace/manifest.headers -o /workspace/manifest.json "$registry/manifests/$IMAGE_DIGEST"
+                echo "$IMAGE_DIGEST" | grep -q "^sha256:$(sha256sum /workspace/manifest.json | cut -d' ' -f1)$"
+                type=$(grep -i '^content-type:' /workspace/manifest.headers | cut -d' ' -f2 | tr -d '\r')
+                curl -fsS --cacert "$ca" -u "serviceaccount:$token" -X PUT -H "Content-Type: $type" \
+                  --data-binary @/workspace/manifest.json "$registry/manifests/main"
+                printf 'Moved box1-ci/rhel-image-poc:main to %s\n' "$IMAGE_DIGEST"
     results:
       - name: image-digest
         value: "$(tasks.build.results.image-digest)"

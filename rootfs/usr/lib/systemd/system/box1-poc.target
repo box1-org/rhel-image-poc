@@ -5,5 +5,5 @@
 Description=box1 RHEL image mode POC appliance
 Requires=multi-user.target
 After=multi-user.target
-Wants=box1-poc-hello.service
+Wants=box1-poc-hello.service box1-registry-setup.service
 AllowIsolate=yes

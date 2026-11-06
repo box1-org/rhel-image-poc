@@ -1,6 +1,8 @@
 # Root disk imported once from the pipeline-built containerDisk. It is a
 # persistent PVC, so `bootc upgrade`/`bootc rollback` state survives restarts.
-# Set the digest from the release PipelineRun's disk-digest result.
+# Set the digest from the release PipelineRun's disk-digest result. It only
+# matters for the first install (the DataVolume spec is immutable); later OS
+# changes arrive through `bootc upgrade` from box1-ci/rhel-image-poc:main.
 apiVersion: cdi.kubevirt.io/v1beta1
 kind: DataVolume
 metadata:
@@ -13,7 +15,7 @@ metadata:
 spec:
   source:
     registry:
-      url: docker://image-registry.openshift-image-registry.svc:5000/box1-ci/rhel-image-poc-disk@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      url: docker://image-registry.openshift-image-registry.svc:5000/box1-ci/rhel-image-poc-disk@sha256:e706a8918c9b605910785fcd9a68824ec43c5ec3142feab3887cebd624434d28
       pullMethod: node
   storage:
     storageClassName: lvms-vg1
