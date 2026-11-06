@@ -81,6 +81,27 @@ virtctl console rhel-image-poc -n rhel-image-poc
 virtctl ssh cloud-user@vm/rhel-image-poc -n rhel-image-poc
 ```
 
-The root disk is a persistent PVC imported once. After that, the OS changes **in place** with `bootc upgrade` or `bootc switch`, which pull from `box1-ci/rhel-image-poc`. Re-importing the disk image is not needed. `bootc rollback` returns to the previous deployment.
+The root disk is a persistent PVC, imported once. After that, the OS changes **in place**.
+
+## Updating the OS (bootc)
+
+Installed VMs track the update channel `image-registry.openshift-image-registry.svc:5000/box1-ci/rhel-image-poc:main`. Each release that fully succeeds (build, security, disk) moves `:main` to the exact manifest it built, so the digests in `bootc status` match the release's `image-digest` result.
+
+```sh
+virtctl ssh -n rhel-image-poc cloud-user@vm/rhel-image-poc
+sudo bootc upgrade --check     # is a newer :main available?
+sudo bootc upgrade --apply     # download, stage and reboot into it
+sudo bootc status              # booted / staged / rollback digests
+sudo bootc rollback --apply    # reboot into the previous deployment
+```
+
+- **No unattended reboots.** `bootc-fetch-apply-updates.timer` is disabled in the image. Updates happen only when someone runs `bootc upgrade --apply`.
+- **Registry access.** At boot, `box1-registry-setup.service` reads two KubeVirt disks:
+  - `virtio-serviceca`: ConfigMap `openshift-service-ca.crt`, installed as `/etc/containers/certs.d/<registry>/ca.crt`.
+  - `virtio-regtoken`: Secret `rhel-image-poc-updater-token`, written to `/run/ostree/auth.json` (tmpfs, 0600).
+
+  To rotate the token, delete the Secret (the token controller recreates it), then restart the VM.
+- **What persists.** `/etc` changes carry forward across upgrades (three-way merge). `/var` is never touched. `/usr` is replaced by the new image.
+- **VMs installed before the update channel existed** track `localhost/rhel-image-poc:disk-build`. Move them over once with `sudo bootc switch image-registry.openshift-image-registry.svc:5000/box1-ci/rhel-image-poc:main` (run `box1-registry-setup` first if the image predates it).
 
 To remove the POC VM: `oc delete -k deploy/`. This deletes the VM, the DataVolume/PVC and the namespace.
