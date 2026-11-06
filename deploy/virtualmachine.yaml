@@ -31,6 +31,15 @@ spec:
               bootOrder: 1
               disk:
                 bus: virtio
+            # Read by box1-registry-setup.service as /dev/disk/by-id/virtio-<serial>.
+            - name: serviceca
+              serial: serviceca
+              disk:
+                bus: virtio
+            - name: regtoken
+              serial: regtoken
+              disk:
+                bus: virtio
           interfaces:
             - name: default
               masquerade: {}
@@ -41,3 +50,11 @@ spec:
         - name: root
           dataVolume:
             name: rhel-image-poc-root
+        # Registry CA for bootc updates (auto-created and rotated by OpenShift).
+        - name: serviceca
+          configMap:
+            name: openshift-service-ca.crt
+        # Pull token for bootc updates (deploy/updater.yaml).
+        - name: regtoken
+          secret:
+            secretName: rhel-image-poc-updater-token

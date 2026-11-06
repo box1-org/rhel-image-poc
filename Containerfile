@@ -26,9 +26,11 @@ COPY rootfs/ /
 
 RUN rm -rf /run/secrets/entitlement /run/box1-repos /run/rhsm \
  && printf 'BOX1_POC_REVISION=%s\n' "${SOURCE_REVISION}" > /usr/lib/box1-poc-release \
- && chmod 0755 /usr/libexec/box1-poc/hello \
+ && chmod 0755 /usr/libexec/box1-poc/hello /usr/libexec/box1-poc/registry-setup \
  && chmod 0440 /etc/sudoers.d/90-box1-wheel && visudo -cf /etc/sudoers.d/90-box1-wheel \
  && systemctl set-default box1-poc.target \
+ && systemctl enable box1-registry-setup.service \
+ && systemctl disable bootc-fetch-apply-updates.timer \
  && rpm -q qemu-guest-agent \
  && bootc container lint
 
